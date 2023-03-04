@@ -30,9 +30,11 @@ from monai.networks.nets import SwinUNETR
 from monai.transforms import Activations, AsDiscrete, Compose
 from monai.utils.enums import MetricReduction
 
+
+
 parser = argparse.ArgumentParser(description="Swin UNETR segmentation pipeline")
 parser.add_argument("--checkpoint", default=None, help="start training from saved checkpoint")
-parser.add_argument("--logdir", default="test", type=str, help="directory to save the tensorboard logs")
+parser.add_argument("--logdir", default=None, type=str, help="directory to save the tensorboard logs")
 parser.add_argument(
     "--pretrained_dir", default="./pretrained_models/", type=str, help="pretrained checkpoint directory"
 )
@@ -96,7 +98,7 @@ parser.add_argument("--squared_dice", action="store_true", help="use squared Dic
 def main():
     args = parser.parse_args()
     args.amp = not args.noamp
-    args.logdir = "./runs/" + args.logdir
+    # args.logdir = "./runs/" + args.logdir
     if args.distributed:
         args.ngpus_per_node = torch.cuda.device_count()
         print("Found total gpus", args.ngpus_per_node)
@@ -167,7 +169,7 @@ def main_worker(gpu, args):
 
     if args.squared_dice:
         dice_loss = DiceCELoss(
-            to_onehot_y=True, softmax=True, squared_pred=True, smooth_nr=args.smooth_nr, smooth_dr=args.smooth_dr
+            to_onehot_y=True, softmax=True, squared_pred=True, smooth_nr=args.smooth_nr, smooth_dr=args.smooth_dr, include_background=False
         )
     else:
         dice_loss = DiceCELoss(to_onehot_y=True, softmax=True)

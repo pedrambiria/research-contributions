@@ -17,12 +17,18 @@ import numpy as np
 import torch
 import torch.nn.parallel
 import torch.utils.data.distributed
-from tensorboardX import SummaryWriter
+# from tensorboardX import SummaryWriter
 from torch.cuda.amp import GradScaler, autocast
 from utils.utils import AverageMeter, distributed_all_gather
+import wandb
 
 from monai.data import decollate_batch
 
+
+os.environ["WANDB_API_KEY"] = 'da1d2dae67f47981bae70e753d0f8f0a282828c7'
+
+wandb.login()
+wandb.init(project="skeleton")
 
 def train_epoch(model, loader, optimizer, scaler, epoch, loss_func, args):
     model.train()
@@ -60,6 +66,10 @@ def train_epoch(model, loader, optimizer, scaler, epoch, loss_func, args):
                 "loss: {:.4f}".format(run_loss.avg),
                 "time {:.2f}s".format(time.time() - start_time),
             )
+            wandb.log({
+                "Epoch": epoch,
+                "Train Loss": run_loss.avg,
+            })
         start_time = time.time()
     for param in model.parameters():
         param.grad = None
