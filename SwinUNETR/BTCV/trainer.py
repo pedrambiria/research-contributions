@@ -17,18 +17,17 @@ import numpy as np
 import torch
 import torch.nn.parallel
 import torch.utils.data.distributed
-# from tensorboardX import SummaryWriter
 from torch.cuda.amp import GradScaler, autocast
 from utils.utils import AverageMeter, distributed_all_gather
+import nibabel as nib
 import wandb
 
 from monai.data import decollate_batch
 
-
-os.environ["WANDB_API_KEY"] = 'da1d2dae67f47981bae70e753d0f8f0a282828c7'
-
-wandb.login()
-wandb.init(project="skeleton")
+if args.wandb_key:
+    os.environ["WANDB_API_KEY"] = args.wandb_key
+    wandb.login()
+    wandb.init(project=args.wandb_project)
 
 def train_epoch(model, loader, optimizer, scaler, epoch, loss_func, args):
     model.train()
@@ -60,16 +59,13 @@ def train_epoch(model, loader, optimizer, scaler, epoch, loss_func, args):
             )
         else:
             run_loss.update(loss.item(), n=args.batch_size)
-        if args.rank == 0:
+        if args.rank == 0 and args.print_result::
             print(
                 "Epoch {}/{} {}/{}".format(epoch, args.max_epochs, idx, len(loader)),
                 "loss: {:.4f}".format(run_loss.avg),
                 "time {:.2f}s".format(time.time() - start_time),
             )
-            wandb.log({
-                "Epoch": epoch,
-                "Train Loss": run_loss.avg,
-            })
+
         start_time = time.time()
     for param in model.parameters():
         param.grad = None
@@ -94,6 +90,7 @@ def val_epoch(model, loader, epoch, acc_func, args, model_inferer=None, post_lab
                     logits = model(data)
             if not logits.is_cuda:
                 target = target.cpu()
+            
             val_labels_list = decollate_batch(target)
             val_labels_convert = [post_label(val_label_tensor) for val_label_tensor in val_labels_list]
             val_outputs_list = decollate_batch(logits)
@@ -109,22 +106,31 @@ def val_epoch(model, loader, epoch, acc_func, args, model_inferer=None, post_lab
                 )
                 for al, nl in zip(acc_list, not_nans_list):
                     run_acc.update(al, n=nl)
-
             else:
                 run_acc.update(acc.cpu().numpy(), n=not_nans.cpu().numpy())
 
-            if args.rank == 0:
+            if args.rank == 0 and args.print_result:
                 avg_acc = np.mean(run_acc.avg)
-                print(
-                    "Val {}/{} {}/{}".format(epoch, args.max_epochs, idx, len(loader)),
-                    "acc",
-                    avg_acc,
-                    "time {:.2f}s".format(time.time() - start_time),
-                )
+                if args.print_result:
+                    print(
+                        "Val {}/{} {}/{}".format(epoch, args.max_epochs, idx, len(loader)),
+                        "acc",
+                        avg_acc,
+                        "time {:.2f}s".format(time.time() - start_time),
+                    )
+                if args.save_validation_output and avg_acc > 0.95:
+                    save_validation_output(logits, avg_acc)             
             start_time = time.time()
     return run_acc.avg
 
-
+def save_validation_output(val_outputs, avg_acc):
+    img_np = val_outputs.detach().cpu().numpy()
+    image_np = img_np[0,1,:,:,:]
+    image_np[image_np > 0.5] = 1
+    image_np[image_np <= 0.5] = 0
+    ni_img = nib.Nifti1Image(image_np, affine=np.eye(4))
+    nib.save(ni_img, f"dicom_volume_image_{avg_acc}.nii.gz")
+    
 def save_checkpoint(model, epoch, args, filename="model.pt", best_acc=0, optimizer=None, scheduler=None):
     state_dict = model.state_dict() if not args.distributed else model.module.state_dict()
     save_dict = {"epoch": epoch, "best_acc": best_acc, "state_dict": state_dict}
@@ -132,7 +138,7 @@ def save_checkpoint(model, epoch, args, filename="model.pt", best_acc=0, optimiz
         save_dict["optimizer"] = optimizer.state_dict()
     if scheduler is not None:
         save_dict["scheduler"] = scheduler.state_dict()
-    filename = os.path.join(args.logdir, filename)
+    filename = os.path.join(args.data_dir, filename)
     torch.save(save_dict, filename)
     print("Saving checkpoint", filename)
 
@@ -151,11 +157,6 @@ def run_training(
     post_label=None,
     post_pred=None,
 ):
-    writer = None
-    if args.logdir is not None and args.rank == 0:
-        writer = SummaryWriter(log_dir=args.logdir)
-        if args.rank == 0:
-            print("Writing Tensorboard logs to ", args.logdir)
     scaler = None
     if args.amp:
         scaler = GradScaler()
@@ -170,13 +171,16 @@ def run_training(
             model, train_loader, optimizer, scaler=scaler, epoch=epoch, loss_func=loss_func, args=args
         )
         if args.rank == 0:
-            print(
-                "Final training  {}/{}".format(epoch, args.max_epochs - 1),
-                "loss: {:.4f}".format(train_loss),
-                "time {:.2f}s".format(time.time() - epoch_time),
-            )
-        if args.rank == 0 and writer is not None:
-            writer.add_scalar("train_loss", train_loss, epoch)
+            if args.print_result:
+                print(
+                    "Final training  {}/{}".format(epoch, args.max_epochs - 1),
+                    "loss: {:.4f}".format(train_loss),
+                    "time {:.2f}s".format(time.time() - epoch_time),
+                )
+            wandb.log({
+                "Epoch": epoch,
+                "Train Loss": train_loss,
+            })
         b_new_best = False
         if (epoch + 1) % args.val_every == 0:
             if args.distributed:
@@ -196,14 +200,16 @@ def run_training(
             val_avg_acc = np.mean(val_avg_acc)
 
             if args.rank == 0:
-                print(
-                    "Final validation  {}/{}".format(epoch, args.max_epochs - 1),
-                    "acc",
-                    val_avg_acc,
-                    "time {:.2f}s".format(time.time() - epoch_time),
-                )
-                if writer is not None:
-                    writer.add_scalar("val_acc", val_avg_acc, epoch)
+                if args.print_result:
+                    print(
+                        "Final validation  {}/{}".format(epoch, args.max_epochs - 1),
+                        "acc",
+                        val_avg_acc,
+                        "time {:.2f}s".format(time.time() - epoch_time),
+                    )
+                wandb.log({
+                    "Val acc":val_avg_acc
+                })
                 if val_avg_acc > val_acc_max:
                     print("new best ({:.6f} --> {:.6f}). ".format(val_acc_max, val_avg_acc))
                     val_acc_max = val_avg_acc
@@ -212,11 +218,11 @@ def run_training(
                         save_checkpoint(
                             model, epoch, args, best_acc=val_acc_max, optimizer=optimizer, scheduler=scheduler
                         )
-            if args.rank == 0 and args.logdir is not None and args.save_checkpoint:
+            if args.rank == 0 and args.save_checkpoint:
                 save_checkpoint(model, epoch, args, best_acc=val_acc_max, filename="model_final.pt")
                 if b_new_best:
                     print("Copying to model.pt new best model!!!!")
-                    shutil.copyfile(os.path.join(args.logdir, "model_final.pt"), os.path.join(args.logdir, "model.pt"))
+                    shutil.copyfile(os.path.join(args.data_dir, "model_final.pt"), os.path.join(args.data_dir, "model.pt"))
 
         if scheduler is not None:
             scheduler.step()

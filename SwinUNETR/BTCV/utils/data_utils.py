@@ -73,7 +73,7 @@ def get_loader(args):
         [
             transforms.LoadImaged(keys=["image", "label"]),
             transforms.AddChanneld(keys=["image", "label"]),
-            transforms.Orientationd(keys=["image", "label"], axcodes="RAS"),
+            # transforms.Orientationd(keys=["image", "label"], axcodes="RAS"),
             # transforms.Spacingd(
             #     keys=["image", "label"], pixdim=(args.space_x, args.space_y, args.space_z), mode=("bilinear", "nearest")
             # ),
@@ -87,7 +87,7 @@ def get_loader(args):
                 spatial_size=(args.roi_x, args.roi_y, args.roi_z),
                 pos=1,
                 neg=1,
-                num_samples=1,
+                num_samples=args.num_samples,
                 image_key="image",
                 # image_threshold=0,
             ),
@@ -104,7 +104,7 @@ def get_loader(args):
         [
             transforms.LoadImaged(keys=["image", "label"]),
             transforms.AddChanneld(keys=["image", "label"]),
-            transforms.Orientationd(keys=["image", "label"], axcodes="RAS"),
+            # transforms.Orientationd(keys=["image", "label"], axcodes="RAS"),
             # transforms.Spacingd(
             #     keys=["image", "label"], pixdim=(args.space_x, args.space_y, args.space_z), mode=("bilinear", "nearest")
             # ),

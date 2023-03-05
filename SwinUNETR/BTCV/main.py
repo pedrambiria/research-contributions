@@ -93,6 +93,11 @@ parser.add_argument("--use_checkpoint", action="store_true", help="use gradient 
 parser.add_argument("--use_ssl_pretrained", action="store_true", help="use self-supervised pretrained weights")
 parser.add_argument("--spatial_dims", default=3, type=int, help="spatial dimension of input data")
 parser.add_argument("--squared_dice", action="store_true", help="use squared Dice")
+parser.add_argument("--num_samples", default=2, type=int, help="number of samples")
+parser.add_argument("--wandb_key", default=None, type=str, help="wandb API key")
+parser.add_argument("--wandb_project", default="skeleton", type=str, help="wandb project")
+parser.add_argument("--save_validation_output", action="store_true", help="save validation output")
+parser.add_argument("--print_result", action="store_true", help="print result")
 
 
 def main():
@@ -166,10 +171,10 @@ def main_worker(gpu, args):
             print("Using pretrained self-supervised Swin UNETR backbone weights !")
         except ValueError:
             raise ValueError("Self-supervised pre-trained weights not available for" + str(args.model_name))
-
+    include_background = args.out_channels < 3
     if args.squared_dice:
         dice_loss = DiceCELoss(
-            to_onehot_y=True, softmax=True, squared_pred=True, smooth_nr=args.smooth_nr, smooth_dr=args.smooth_dr, include_background=False
+            to_onehot_y=True, softmax=True, squared_pred=True, smooth_nr=args.smooth_nr, smooth_dr=args.smooth_dr, include_background=include_background
         )
     else:
         dice_loss = DiceCELoss(to_onehot_y=True, softmax=True)
