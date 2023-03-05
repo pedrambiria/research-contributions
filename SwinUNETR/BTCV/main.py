@@ -138,6 +138,8 @@ def main_worker(gpu, args):
         img_size=(args.roi_x, args.roi_y, args.roi_z),
         in_channels=args.in_channels,
         out_channels=args.out_channels,
+        depths=(4,4,4,4,4),
+        num_heads=(3,6,12,24,48),
         feature_size=args.feature_size,
         drop_rate=0.0,
         attn_drop_rate=0.0,

@@ -24,10 +24,6 @@ import wandb
 
 from monai.data import decollate_batch
 
-if args.wandb_key:
-    os.environ["WANDB_API_KEY"] = args.wandb_key
-    wandb.login()
-    wandb.init(project=args.wandb_project)
 
 def train_epoch(model, loader, optimizer, scaler, epoch, loss_func, args):
     model.train()
@@ -59,7 +55,7 @@ def train_epoch(model, loader, optimizer, scaler, epoch, loss_func, args):
             )
         else:
             run_loss.update(loss.item(), n=args.batch_size)
-        if args.rank == 0 and args.print_result::
+        if args.rank == 0 and args.print_result:
             print(
                 "Epoch {}/{} {}/{}".format(epoch, args.max_epochs, idx, len(loader)),
                 "loss: {:.4f}".format(run_loss.avg),
@@ -142,6 +138,11 @@ def save_checkpoint(model, epoch, args, filename="model.pt", best_acc=0, optimiz
     torch.save(save_dict, filename)
     print("Saving checkpoint", filename)
 
+def setup_wandb(args):
+    if args.wandb_key:
+        os.environ["WANDB_API_KEY"] = args.wandb_key
+        wandb.login()
+        wandb.init(project=args.wandb_project)
 
 def run_training(
     model,
@@ -157,6 +158,7 @@ def run_training(
     post_label=None,
     post_pred=None,
 ):
+    setup_wandb(args)
     scaler = None
     if args.amp:
         scaler = GradScaler()
